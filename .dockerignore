@@ -1,3 +1,5 @@
 .gitignore
+Dockerfile
+package-lock.json
 *.sh
 !docker-entrypoint.sh
