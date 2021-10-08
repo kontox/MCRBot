@@ -5,6 +5,8 @@ Create a copy of the _config.ts (found in the repo) called config.ts and place i
 
 `mkdir $HOME/mcrbot`
 
+`mkdir $HOME/mcrbot/data`
+
 `cp _config.ts $HOME/mcrbot/config.ts` 
 
 Edit the config file and add your API keys and other settings. Verify that the content is correct. 
@@ -12,7 +14,13 @@ Edit the config file and add your API keys and other settings. Verify that the c
 # Run docker container
 You can run the container detached with the config folder mounted
 
-`docker run --name mcrbot -d --restart always --mount "type=bind,source=$HOME/mcrbot,destination=/home/mcrbot/conf/,readonly" kontox/mcrbot:latest`
+`docker run --name mcrbot -d --restart always \\`
+
+`--mount "type=bind,source=$HOME/mcrbot,destination=/home/mcrbot/conf/,readonly" \\`
+
+`--mount "type=bind,source=$HOME/mcrbot/data,destination=/home/mcrbot/data/" \\`
+
+` kontox/mcrbot:latest`
 
 # Check logs
 Use the following command for checking the logs. The --timestamps parameter is important otherwise you'll not see the time

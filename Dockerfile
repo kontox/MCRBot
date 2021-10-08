@@ -8,6 +8,7 @@ RUN useradd -m -s /bin/bash mcrbot && \
     chown -R mcrbot:mcrbot /home/mcrbot
 
 VOLUME /home/mcrbot/conf
+VOLUME /home/mcrbot/data
 USER mcrbot:mcrbot
 WORKDIR /home/mcrbot
 
