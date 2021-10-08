@@ -1,9 +1,7 @@
-# Docker build
-Clone the content `git clone https://github.com/Thornsnake/MCRBot.git`
-Navigate into the bot folder and build docker container using `docker build -t mcrbot .`
+[![Build Status](https://app.travis-ci.com/kontox/MCRBot.svg?branch=master)](https://app.travis-ci.com/kontox/MCRBot)
 
 # Create config file
-Create a copy of the _config.ts file called config.ts and place it in a different folder for example $HOME/mcrbot
+Create a copy of the _config.ts (found in the repo) called config.ts and place it in a different folder for example $HOME/mcrbot
 
 `mkdir $HOME/mcrbot`
 `cp _config.ts $HOME/mcrbot/config.ts` 
@@ -12,10 +10,12 @@ Edit the config file and add your API keys and other settings. Verify that the c
 
 # Run docker container
 You can run the container detached with the config folder mounted
-`docker run --name mcrbot -d --restart always --mount "type=bind,source=$HOME/mcrbot,destination=/home/mcrbot/conf/,readonly" mcrbot:latest`
+
+`docker run --name mcrbot -d --restart always --mount "type=bind,source=$HOME/mcrbot,destination=/home/mcrbot/conf/,readonly" kontox/mcrbot:latest`
 
 # Check logs
 Use the following command for checking the logs. The --timestamps parameter is important otherwise you'll not see the time
+
 `docker logs --timestamps mcrbot`
 
 # Updating the docker container
