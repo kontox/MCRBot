@@ -8,7 +8,12 @@ Create a folder called data in $HOME/mcrbot
 # Run docker container
 You can run the container detached with the config folder mounted
 
-`docker run --name mcrbot -d --restart always -v $HOME/mcrbot/config.ts:/home/mcrbot/config.ts -v $HOME/mcrbot/data/:/home/mcrbot/data/ kontox/mcrbot:latest`
+`docker run --name mcrbot -d --restart always -e uid=$UID -v $HOME/mcrbot/config.ts:/mcrbot/config.ts -v $HOME/mcrbot/data/:/mcrbot/data/ kontox/mcrbot:latest`
+
+
+or those that use docker-compose can simply start it using
+
+`docker-compose up -d`
 
 
 # Check logs

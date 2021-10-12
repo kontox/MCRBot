@@ -1,23 +1,20 @@
-# Set image
-ARG tag=lts
-FROM node:$tag
+FROM alpine
 
-#Add user, copy the default _config.ts  and change owner
-RUN useradd -m -s /bin/bash mcrbot && \
-    mkdir /home/mcrbot/data && \
-    chown -R mcrbot:mcrbot /home/mcrbot
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh 
 
-VOLUME /home/mcrbot/data
-USER mcrbot:mcrbot
-WORKDIR /home/mcrbot
+RUN apk --no-cache add nodejs npm su-exec; \
+    mkdir -p /mcrbot/data ; \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
+    
+VOLUME /mcrbot/data
+WORKDIR /mcrbot
 
-# Copy content
-COPY --chown=mcrbot:mcrbot . .
+COPY . .
 
 # install dependencies
-RUN cp /home/mcrbot/template/_config.ts /home/mcrbot/config.ts && \
-    chmod +x docker-entrypoint.sh && \
-    npm install
+RUN npm install; \
+# workaround for automatic update to avoid throwing an error
+    touch update.sh 
 
-ENTRYPOINT ["./docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD [ "node", "index.js" ]

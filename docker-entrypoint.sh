@@ -1,10 +1,11 @@
 #!/bin/sh
 set -e
+CURRENT_UID=${uid:-9999}
 
-if [ "$1" = 'sh' ]; then
-    /bin/sh
+echo "Running as user ID: $CURRENT_UID"
+if ! id mcrbot &>/dev/null; then 
+    adduser -s /bin/sh -u $CURRENT_UID -D -H mcrbot
+    ./node_modules/.bin/tsc
 fi
 
-./node_modules/.bin/tsc
-
-exec "$@"
+exec su-exec mcrbot "$@"

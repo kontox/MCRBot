@@ -1,0 +1,11 @@
+version: '3.3'
+services:
+    mcrbot:
+        container_name: mcrbot
+        restart: always
+        environment:
+            - uid=$UID
+        volumes:
+            - '$HOME/mcrbot/config.ts:/mcrbot/config.ts'
+            - '$HOME/mcrbot/data/:/mcrbot/data/'
+        image: 'kontox/mcrbot:latest'
