@@ -318,7 +318,7 @@ class Bot {
                     this._autoUpdateRunning = true;
 
                     console.log(`[UPDATE] Waiting for schedules to finish`);
-    
+
                     for (let i = 0; i < 600; i++) {
                         if (this._trailingStopRunning || this._investingRunning || this._rebalancingRunning) {
                             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -329,23 +329,23 @@ class Bot {
                              */
                             try {
                                 console.log(`[UPDATE] Checking for new updates`);
-    
+
                                 const subprocess = spawn("sh", ["update.sh"], {
                                     detached: true,
                                     stdio: "ignore"
                                 });
-    
+
                                 subprocess.unref();
                             }
                             catch (err) {
                                 console.error(err);
                             }
-    
+
                             break;
                         }
                     }
                 }
-                catch(err) {
+                catch (err) {
                     console.error(err);
                 }
                 finally {

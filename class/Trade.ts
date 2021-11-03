@@ -4,13 +4,14 @@ import { IInstrument } from "../interface/IInstrument.js";
 import { Instrument } from "./Instrument.js";
 import { CoinGecko } from "./CoinGecko.js";
 import { Account } from "./Account.js";
-import { Ticker } from "./Ticker.js";
 import { Calculation } from "./Calculation.js";
 import { CONFIG } from "../config.js";
 import { ICoinRemoval } from "../interface/ICoinRemoval.js";
 import { Disk } from "./Disk.js";
 import { IPortfolioATH } from "../interface/IPortfolioATH.js";
 import { IAccount } from "../interface/IAccount.js";
+import { EMessageDataRebalanceCoinDirection, EMessageType, IMessageDataInvest, IMessageDataRebalance, WebHook } from "./WebHook.js";
+import { Book } from "./Book.js";
 
 enum ETradeType {
     INVEST = "invest",
@@ -23,7 +24,7 @@ export class Trade {
     private _instrument: Instrument;
     private _coinGecko: CoinGecko;
     private _account: Account;
-    private _ticker: Ticker;
+    private _book: Book;
     private _calculation: Calculation;
     private _disk: Disk;
 
@@ -32,7 +33,7 @@ export class Trade {
         this._instrument = new Instrument();
         this._coinGecko = new CoinGecko();
         this._account = new Account();
-        this._ticker = new Ticker();
+        this._book = new Book();
         this._calculation = new Calculation;
         this._disk = new Disk();
     }
@@ -53,8 +54,8 @@ export class Trade {
         return this._account;
     }
 
-    private get Ticker() {
-        return this._ticker;
+    public get Book() {
+        return this._book;
     }
 
     private get Calculation() {
@@ -190,21 +191,21 @@ export class Trade {
         let balance = await this.Account.all();
 
         /**
-         * Get the ticker for all instruments on crypto.com.
+         * Get the order book for all tradable coins.
          */
-        const tickers = await this.Ticker.all();
+        const book = await this.Book.all(tradableCoins);
 
         /**
          * Make sure everything is present.
          */
-        if (!balance || !tickers) {
+        if (!balance || !book) {
             return;
         }
 
         /**
          * Calculate the current portfolio worth.
          */
-        const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, tickers);
+        const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, book);
 
         /**
          * If the portfolio worth is zero, there is nothing to rebalance and we can abort.
@@ -226,14 +227,6 @@ export class Trade {
             });
 
             if (!instrument) {
-                continue;
-            }
-
-            const ticker = tickers.find((row) => {
-                return row.i.toUpperCase().split("_")[0] === coinBalance.currency.toUpperCase() && row.i.toUpperCase().split("_")[1] === CONFIG.QUOTE.toUpperCase();
-            });
-
-            if (!ticker) {
                 continue;
             }
 
@@ -285,6 +278,14 @@ export class Trade {
         }
 
         /**
+         * Create a list of sold and bought coins for the webhook message.
+         */
+        const webhookData: IMessageDataRebalance = {
+            portfolioWorth: portfolioWorth,
+            coins: []
+        }
+
+        /**
         * If a coins has fallen out of the top x coins by market cap, sell the coin and rebalance
         * the money over the other coins.
         */
@@ -299,11 +300,11 @@ export class Trade {
                 continue;
             }
 
-            const ticker = tickers.find((row) => {
-                return row.i.toUpperCase().split("_")[0] === coinBalance.currency.toUpperCase() && row.i.toUpperCase().split("_")[1] === CONFIG.QUOTE.toUpperCase();
+            const orderBook = book.find((row) => {
+                return row.i === instrument.instrument_name;
             });
 
-            if (!ticker) {
+            if (!orderBook) {
                 continue;
             }
 
@@ -330,7 +331,7 @@ export class Trade {
                     const sold = await this.sell(instrument, quantity, ETradeType.REBALANCE);
 
                     if (sold) {
-                        soldCoinWorth += quantity * ticker.k;
+                        soldCoinWorth += this.Calculation.getOrderBookBidWorth(quantity, orderBook);
 
                         const index = coinRemovalList.findIndex((row) => {
                             return row.coin === coinBalance.currency.toUpperCase();
@@ -338,7 +339,14 @@ export class Trade {
 
                         coinRemovalList.splice(index, 1);
 
-                        console.log(`[SELL] ${coinBalance.currency.toUpperCase()} for ${(quantity * ticker.k)} ${CONFIG.QUOTE}`);
+                        console.log(`[SELL] ${coinBalance.currency.toUpperCase()} for ${(soldCoinWorth)} ${CONFIG.QUOTE}`);
+
+                        webhookData.coins.push({
+                            currency: coinBalance.currency.toUpperCase(),
+                            amount: soldCoinWorth,
+                            percentage: 0,
+                            direction: EMessageDataRebalanceCoinDirection.SELL
+                        });
                     }
                 }
             }
@@ -381,15 +389,15 @@ export class Trade {
                 continue;
             }
 
-            const ticker = tickers.find((row) => {
-                return row.i.toUpperCase().split("_")[0] === coin && row.i.toUpperCase().split("_")[1] === CONFIG.QUOTE.toUpperCase();
+            const orderBook = book.find((row) => {
+                return row.i === instrument.instrument_name;
             });
 
-            if (!ticker) {
+            if (!orderBook) {
                 continue;
             }
 
-            const minimumNotional = this.Calculation.fixNotional(instrument, this.Calculation.minimumBuyNotional(instrument, ticker));
+            const minimumNotional = this.Calculation.fixNotional(instrument, this.Calculation.minimumBuyNotional(instrument, orderBook));
 
             if (minimumNotional > soldCoinWorth) {
                 continue;
@@ -411,7 +419,18 @@ export class Trade {
                 soldCoinWorth -= buyNotional;
 
                 console.log(`[BUY] ${coin} for ${buyNotional} ${CONFIG.QUOTE}`);
+
+                webhookData.coins.push({
+                    currency: coin,
+                    amount: buyNotional,
+                    percentage: 0,
+                    direction: EMessageDataRebalanceCoinDirection.BUY
+                });
             }
+        }
+
+        if (webhookData.coins.length > 0) {
+            WebHook.sendToDiscord(webhookData, EMessageType.REBALANCE_MARKET_CAP);
         }
 
         return hadWorkToDo;
@@ -426,21 +445,21 @@ export class Trade {
         let balance = await this.Account.all();
 
         /**
-         * Get the ticker for all instruments on crypto.com.
+         * Get the order book for all tradable coins.
          */
-        const tickers = await this.Ticker.all();
+        const book = await this.Book.all(tradableCoins);
 
         /**
          * Make sure everything is present.
          */
-        if (!balance || !tickers) {
+        if (!balance || !book) {
             return;
         }
 
         /**
          * Calculate the current portfolio worth.
          */
-        const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, tickers);
+        const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, book);
 
         /**
          * If the portfolio worth is zero, there is nothing to rebalance and we can abort.
@@ -452,13 +471,21 @@ export class Trade {
         /**
          * Calculate the worth that each coin is deviating from the average.
          */
-        const distributionDelta = this.Calculation.getDistributionDelta(portfolioWorth, tradableCoins, balance, tickers);
+        const distributionDelta = this.Calculation.getDistributionDelta(portfolioWorth, tradableCoins, balance, book);
 
         for (const coin of distributionDelta) {
             if (coin.percentage >= CONFIG.THRESHOLD) {
                 console.log(`[CHECK] ${coin.name} deviates ${coin.deviation} ${CONFIG.QUOTE} (${coin.percentage.toFixed(2)}%) -> [OVERPERFORMING]`);
                 hadWorkToDo = true;
             }
+        }
+
+        /**
+         * Create a list of sold and bought coins for the webhook message.
+         */
+        const webhookData: IMessageDataRebalance = {
+            portfolioWorth: portfolioWorth,
+            coins: []
         }
 
         /**
@@ -476,11 +503,11 @@ export class Trade {
                 continue;
             }
 
-            const ticker = tickers.find((row) => {
-                return row.i.toUpperCase().split("_")[0] === tradableCoin && row.i.toUpperCase().split("_")[1] === CONFIG.QUOTE.toUpperCase();
+            const orderBook = book.find((row) => {
+                return row.i === instrument.instrument_name;
             });
 
-            if (!ticker) {
+            if (!orderBook) {
                 continue;
             }
 
@@ -492,7 +519,7 @@ export class Trade {
                 continue;
             }
 
-            const quantity = this.Calculation.fixQuantity(instrument, coin.deviation / ticker.b);
+            const quantity = this.Calculation.fixQuantity(instrument, coin.deviation / orderBook.bids[0][0]);
             const minimumQuantity = this.Calculation.minimumSellQuantity(instrument);
 
             if (quantity < minimumQuantity) {
@@ -506,6 +533,13 @@ export class Trade {
                 ignoreList.push(coin.name);
 
                 console.log(`[SELL] ${tradableCoin} for ${coin.deviation} ${CONFIG.QUOTE}`);
+
+                webhookData.coins.push({
+                    currency: tradableCoin,
+                    amount: coin.deviation,
+                    percentage: coin.percentage,
+                    direction: EMessageDataRebalanceCoinDirection.SELL
+                });
             }
         }
 
@@ -547,15 +581,15 @@ export class Trade {
                 continue;
             }
 
-            const ticker = tickers.find((row) => {
-                return row.i.toUpperCase().split("_")[0] === lowestPerformer.name && row.i.toUpperCase().split("_")[1] === CONFIG.QUOTE.toUpperCase();
+            const orderBook = book.find((row) => {
+                return row.i === instrument.instrument_name;
             });
 
-            if (!ticker) {
+            if (!orderBook) {
                 continue;
             }
 
-            const minimumNotional = this.Calculation.fixNotional(instrument, this.Calculation.minimumBuyNotional(instrument, ticker));
+            const minimumNotional = this.Calculation.fixNotional(instrument, this.Calculation.minimumBuyNotional(instrument, orderBook));
 
             if (minimumNotional > soldCoinWorth) {
                 break;
@@ -577,7 +611,18 @@ export class Trade {
                 soldCoinWorth -= buyNotional;
 
                 console.log(`[BUY] ${lowestPerformer.name} for ${buyNotional} ${CONFIG.QUOTE}`);
+
+                webhookData.coins.push({
+                    currency: lowestPerformer.name,
+                    amount: lowestPerformer.deviation,
+                    percentage: lowestPerformer.percentage,
+                    direction: EMessageDataRebalanceCoinDirection.BUY
+                });
             }
+        }
+
+        if (webhookData.coins.length > 0) {
+            WebHook.sendToDiscord(webhookData, EMessageType.REBALANCE_OVERPERFORMERS);
         }
 
         return hadWorkToDo;
@@ -592,21 +637,21 @@ export class Trade {
         let balance = await this.Account.all();
 
         /**
-         * Get the ticker for all instruments on crypto.com.
+         * Get the order book for all tradable coins.
          */
-        const tickers = await this.Ticker.all();
+        const book = await this.Book.all(tradableCoins);
 
         /**
          * Make sure everything is present.
          */
-        if (!balance || !tickers) {
+        if (!balance || !book) {
             return;
         }
 
         /**
          * Calculate the current portfolio worth.
          */
-        const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, tickers);
+        const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, book);
 
         /**
          * If the portfolio worth is zero, there is nothing to rebalance and we can abort.
@@ -618,7 +663,7 @@ export class Trade {
         /**
          * Calculate the worth that each coin is deviating from the average.
          */
-        const distributionDelta = this.Calculation.getDistributionDelta(portfolioWorth, tradableCoins, balance, tickers);
+        const distributionDelta = this.Calculation.getDistributionDelta(portfolioWorth, tradableCoins, balance, book);
         let ignoreList = [];
 
         for (const coin of distributionDelta) {
@@ -639,6 +684,14 @@ export class Trade {
          */
         if (underperformerWorth > portfolioWorth) {
             underperformerWorth = portfolioWorth;
+        }
+
+        /**
+         * Create a list of sold and bought coins for the webhook message.
+         */
+        const webhookData: IMessageDataRebalance = {
+            portfolioWorth: portfolioWorth,
+            coins: []
         }
 
         /**
@@ -663,19 +716,19 @@ export class Trade {
                 continue;
             }
 
-            const ticker = tickers.find((row) => {
-                return row.i.toUpperCase().split("_")[0] === highestPerformer.name && row.i.toUpperCase().split("_")[1] === CONFIG.QUOTE.toUpperCase();
+            const orderBook = book.find((row) => {
+                return row.i === instrument.instrument_name;
             });
 
-            if (!ticker) {
+            if (!orderBook) {
                 continue;
             }
 
             const sellNotional = Math.abs(highestPerformer.deviation);
-            const quantity = this.Calculation.fixQuantity(instrument, sellNotional / ticker.k);
+            const quantity = this.Calculation.fixQuantity(instrument, sellNotional / orderBook.bids[0][0]);
             const minimumQuantity = this.Calculation.minimumSellQuantity(instrument);
 
-            if (minimumQuantity * ticker.k >= underperformerWorth) {
+            if (this.Calculation.getOrderBookBidWorth(minimumQuantity, orderBook) >= underperformerWorth) {
                 continue;
             }
 
@@ -686,10 +739,17 @@ export class Trade {
             const sold = await this.sell(instrument, quantity, ETradeType.REBALANCE);
 
             if (sold) {
-                underperformerWorth -= quantity * ticker.k;
-                soldCoinWorth += quantity * ticker.k;
+                underperformerWorth -= this.Calculation.getOrderBookBidWorth(quantity, orderBook);
+                soldCoinWorth += this.Calculation.getOrderBookBidWorth(quantity, orderBook);
 
                 console.log(`[SELL] ${highestPerformer.name} for ${sellNotional} ${CONFIG.QUOTE}`);
+
+                webhookData.coins.push({
+                    currency: highestPerformer.name,
+                    amount: highestPerformer.deviation,
+                    percentage: highestPerformer.percentage,
+                    direction: EMessageDataRebalanceCoinDirection.SELL
+                });
             }
         }
 
@@ -733,15 +793,15 @@ export class Trade {
                 continue;
             }
 
-            const ticker = tickers.find((row) => {
-                return row.i.toUpperCase().split("_")[0] === lowestPerformer.name && row.i.toUpperCase().split("_")[1] === CONFIG.QUOTE.toUpperCase();
+            const orderBook = book.find((row) => {
+                return row.i === instrument.instrument_name;
             });
 
-            if (!ticker) {
+            if (!orderBook) {
                 continue;
             }
 
-            const minimumNotional = this.Calculation.fixNotional(instrument, this.Calculation.minimumBuyNotional(instrument, ticker));
+            const minimumNotional = this.Calculation.fixNotional(instrument, this.Calculation.minimumBuyNotional(instrument, orderBook));
 
             if (minimumNotional > soldCoinWorth) {
                 break;
@@ -763,7 +823,18 @@ export class Trade {
                 soldCoinWorth -= buyNotional;
 
                 console.log(`[BUY] ${lowestPerformer.name} for ${buyNotional} ${CONFIG.QUOTE}`);
+
+                webhookData.coins.push({
+                    currency: lowestPerformer.name,
+                    amount: lowestPerformer.deviation,
+                    percentage: lowestPerformer.percentage,
+                    direction: EMessageDataRebalanceCoinDirection.BUY
+                });
             }
+        }
+
+        if (webhookData.coins.length > 0) {
+            WebHook.sendToDiscord(webhookData, EMessageType.REBALANCE_UNDERPERFORMERS);
         }
 
         return hadWorkToDo;
@@ -776,14 +847,14 @@ export class Trade {
         let balance = await this.Account.all();
 
         /**
-         * Get the ticker for all instruments on crypto.com.
+         * Get the order book for all tradable coins.
          */
-        const tickers = await this.Ticker.all();
+        let book = await this.Book.all(tradableCoins);
 
         /**
          * Make sure everything is present.
          */
-        if (!balance || !tickers) {
+        if (!balance || !book) {
             return;
         }
 
@@ -815,15 +886,15 @@ export class Trade {
                 continue;
             }
 
-            const ticker = tickers.find((row) => {
-                return row.i.toUpperCase().split("_")[0] === tradableCoin && row.i.toUpperCase().split("_")[1] === CONFIG.QUOTE.toUpperCase();
+            const orderBook = book.find((row) => {
+                return row.i === instrument.instrument_name;
             });
 
-            if (!ticker) {
+            if (!orderBook) {
                 continue;
             }
 
-            const minimumNotional = this.Calculation.fixNotional(instrument, this.Calculation.minimumBuyNotional(instrument, ticker));
+            const minimumNotional = this.Calculation.fixNotional(instrument, this.Calculation.minimumBuyNotional(instrument, orderBook));
 
             const coinInvestmentTarget = this.Calculation.getCoinInvestmentTarget(tradableCoins, tradableCoin);
             let buyNotional = this.Calculation.fixNotional(instrument, coinInvestmentTarget);
@@ -859,16 +930,21 @@ export class Trade {
             balance = await this.Account.all();
 
             /**
+             * Get the order book for all tradable coins.
+             */
+            book = await this.Book.all(tradableCoins);
+
+            /**
              * Make sure everything is present.
              */
-            if (!balance || !tickers) {
+            if (!balance || !book) {
                 return;
             }
 
             /**
              * Get the current portfolio worth.
              */
-            const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, tickers);
+            const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, book);
 
             /**
              * Add the portfolio worth to the initial investment amount.
@@ -880,6 +956,33 @@ export class Trade {
             ...portfolioATH,
             investment: investment
         });
+
+        /**
+         * Get the current account balance of the user for all coins.
+         */
+        balance = await this.Account.all();
+
+        /**
+         * Get the order book for all tradable coins.
+         */
+        book = await this.Book.all(tradableCoins);
+
+        /**
+         * Calculate the current portfolio worth.
+         */
+        const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, book);
+
+        /**
+         * Create information for the webhook message.
+         */
+        const webhookData: IMessageDataInvest = {
+            investment: totalInvestment,
+            remainingFunds: availableFunds,
+            coinAmount: tradableCoins.length,
+            portfolioWorth: portfolioWorth
+        }
+
+        WebHook.sendToDiscord(webhookData, EMessageType.INVEST);
     }
 
     public async rebalance() {
@@ -1026,6 +1129,11 @@ export class Trade {
                  * Save the current portfolio statistics for the trailing stop.
                  */
                 await this.setPortfolioATH(portfolioATH);
+
+                /**
+                 * Send a webhook message.
+                 */
+                WebHook.sendToDiscord(null, EMessageType.CONTINUE);
             }
         }
 
@@ -1071,21 +1179,21 @@ export class Trade {
         const balance = await this.Account.all();
 
         /**
-         * Get the ticker for all instruments on crypto.com.
+         * Get the order book for all tradable coins.
          */
-        const tickers = await this.Ticker.all();
+        const book = await this.Book.all(tradableCoins);
 
         /**
          * Make sure everything is present.
          */
-        if (!balance || !tickers) {
+        if (!balance || !book) {
             return;
         }
 
         /**
          * Get the current portfolio worth.
          */
-        const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, tickers);
+        const portfolioWorth = this.Calculation.getPortfolioWorth(balance, tradableCoins, book);
 
         /**
          * Set the portfolio all time high.
@@ -1122,11 +1230,11 @@ export class Trade {
                             continue;
                         }
 
-                        const ticker = tickers.find((row) => {
-                            return row.i.toUpperCase().split("_")[0] === coin.currency.toUpperCase() && row.i.toUpperCase().split("_")[1] === CONFIG.QUOTE.toUpperCase();
+                        const orderBook = book.find((row) => {
+                            return row.i === instrument.instrument_name;
                         });
 
-                        if (!ticker) {
+                        if (!orderBook) {
                             continue;
                         }
 
@@ -1147,11 +1255,21 @@ export class Trade {
                         const sold = await this.sell(instrument, quantity, ETradeType.TRAILING_STOP);
 
                         if (sold) {
-                            console.log(`[SELL] ${coin.currency.toUpperCase()} for ${(quantity * ticker.k)} ${CONFIG.QUOTE}`);
+                            console.log(`[SELL] ${coin.currency.toUpperCase()} for ${(this.Calculation.getOrderBookBidWorth(quantity, orderBook))} ${CONFIG.QUOTE}`);
                         }
                     }
 
+                    /**
+                     * Empty the coin removal list.
+                     */
+                    await this.setCoinRemovalList([]);
+
                     console.log(`Portfolio sold, trading will resume in ${CONFIG.TRAILING_STOP.RESUME} hours`);
+
+                    /**
+                     * Send a webhook message.
+                     */
+                    WebHook.sendToDiscord(null, EMessageType.TRAILING_STOP);
                 }
             }
         }
