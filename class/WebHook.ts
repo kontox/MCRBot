@@ -7,6 +7,7 @@ export enum EMessageType {
     REBALANCE_OVERPERFORMERS = "REBALANCE_OVERPERFORMERS",
     REBALANCE_UNDERPERFORMERS = "REBALANCE_UNDERPERFORMERS",
     TRAILING_STOP = "TRAILING_STOP",
+    ARMED = "ARMED",
     CONTINUE = "CONTINUE"
 }
 
@@ -49,6 +50,7 @@ class WebHook {
                         REBALANCE_OVERPERFORMERS: true,
                         REBALANCE_UNDERPERFORMERS: true,
                         TRAILING_STOP: true,
+                        ARMED: true,
                         CONTINUE: true
                     }
                 }
@@ -97,6 +99,10 @@ class WebHook {
             }
 
             if (type === EMessageType.TRAILING_STOP && !CONFIG["WEBHOOKS"]["DISCORD"]["POST"]["TRAILING_STOP"]) {
+                return;
+            }
+
+            if (type === EMessageType.ARMED && !CONFIG["WEBHOOKS"]["DISCORD"]["POST"]["ARMED"]) {
                 return;
             }
 
@@ -157,13 +163,22 @@ class WebHook {
                 embed.setTitle("Trailing stop has been hit");
                 embed.setDescription("Your portfolio has been sold!")
             }
+            else if (type === EMessageType.ARMED) {
+                embed.setColor(parseInt("0xc91082", 16));
+                embed.setTitle("Trailing stop armed");
+                embed.setDescription(`Your portfolio value rose by ${CONFIG.TRAILING_STOP.MIN_PROFIT}% and the trailing stop is now armed! It will trigger, once the portfolio value drops by ${CONFIG.TRAILING_STOP.MAX_DROP}% from its all time high.`)
+            }
             else if (type === EMessageType.CONTINUE) {
                 embed.setColor(parseInt("0xffff00", 16));
                 embed.setTitle("Trading resumed");
                 embed.setDescription("The bot has resumed its trading activity after the trailing stop had been hit!")
             }
 
-            this.DiscordWebHook.send(embed);
+            this.DiscordWebHook.send(
+                embed
+            ).catch((err) => {
+                console.error(err);
+            });
         }
     }
 }
