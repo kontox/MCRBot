@@ -29,11 +29,11 @@ export class Account {
             return response.data.result.accounts[0];
         }
         catch(err) {
-            console.error(`${err.name} - ${err.message}`);
+            console.error(err);
         }
     }
 
-    public async all(): Promise<IAccount[] | undefined> {
+    public async all(): Promise<IAccount[] | null> {
         try {
             const response = await axios.post(
                 "https://api.crypto.com/v2/private/get-account-summary",
@@ -47,7 +47,9 @@ export class Account {
             return response.data.result.accounts;
         }
         catch(err) {
-            console.error(`${err.name} - ${err.message}`);
+            console.error(err);
         }
+
+        return null;
     }
 }

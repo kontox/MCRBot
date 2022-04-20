@@ -90,17 +90,17 @@ class Bot {
          * Make sure the cron expressions for the schedules are valid.
          */
         if (!cronValidator.isValidCron(CONFIG.SCHEDULE.TRAILING_STOP, { alias: true, allowBlankDay: true, allowSevenAsSunday: true, seconds: true })) {
-            console.log("The SCHEDULE -> TRAILING_STOP option is invalid. Please make sure you enter a valid cron expression!")
+            console.log("The SCHEDULE -> TRAILING_STOP option is invalid. Please make sure you enter a valid cron expression!");
             return false;
         }
 
         if (!cronValidator.isValidCron(CONFIG.SCHEDULE.INVESTING, { alias: true, allowBlankDay: true, allowSevenAsSunday: true, seconds: true })) {
-            console.log("The SCHEDULE -> INVESTING option is invalid. Please make sure you enter a valid cron expression!")
+            console.log("The SCHEDULE -> INVESTING option is invalid. Please make sure you enter a valid cron expression!");
             return false;
         }
 
         if (!cronValidator.isValidCron(CONFIG.SCHEDULE.REBALANCE, { alias: true, allowBlankDay: true, allowSevenAsSunday: true, seconds: true })) {
-            console.log("The SCHEDULE -> REBALANCE option is invalid. Please make sure you enter a valid cron expression!")
+            console.log("The SCHEDULE -> REBALANCE option is invalid. Please make sure you enter a valid cron expression!");
             return false;
         }
 
